@@ -23,37 +23,37 @@ var argv = optimist
 var registries = argv._.map(parseRegistry)
 
 function parseRegistry(string) {
-  var parsed = url.parse(string)
+  var parsed = url.parse(string);
   if (!/http(s?):/.test(parsed.protocol))
-    die('invalid registry address: specify a protocol (eg https://): ' + string)
+    die('invalid registry address: specify a protocol (eg https://): ' + string);
 
-  parsed.port || (parsed.port = 80)
+  parsed.port || (parsed.port = 80);
 
-  return parsed
+  return parsed;
 }
 
-(argv.secure ? https : http).createServer(delegate).listen(argv.port)
-console.log('proxy started')
-console.dir(registries.map(url.format))
+(argv.secure ? https : http).createServer(delegate).listen(argv.port);
+console.log('NPM Delegate Started');
+console.dir(registries.map(url.format));
 
 
 function delegate(req, resOut) {
 
   if (req.method !== 'GET') {
-    console.log('invalid method')
+    console.log('Invalid method')
     resOut.statusCode = 405
-    resOut.write(JSON.stringify({error: 'invalid method'}))
+    resOut.write(JSON.stringify({error: 'Invalid method'}))
     resOut.end()
     return
   }
 
   fallback(registries, function (registry, cb) {
-    console.log('forwarding to ' + registry.hostname)
+    console.log('Forwarding to ' + registry.hostname)
     forward(req, registry, function (err, res) {
       if (!err) {
         return cb(null, res)
       }
-      console.log('err calling ' + registry.hostname + '. ' + err)
+      console.log('Error calling ' + registry.hostname + '. ' + err)
       return cb()
     })
 
@@ -64,11 +64,11 @@ function delegate(req, resOut) {
     }
     else if (!resIn) {
       resOut.statusCode = 400
-      resOut.write(JSON.stringify({error: 'request could not be fulfilled by any of the registries on this proxy.'
+      resOut.write(JSON.stringify({error: 'Request could not be fulfilled by any of the registries on this proxy.'
         + 'perhaps the module you\'re looking for does not exist'}))
       resOut.end()
     } else {
-      console.log('proxying response from registry' + url.format(registry))
+      console.log('Proxying response from registry ' + url.format(registry))
       resOut.setHeader('x-registry', url.format(registry))
       pipeRes(resIn, resOut)
     }
@@ -86,41 +86,68 @@ function forward(reqIn, registry, cb) {
   , method: reqIn.method
   , auth: registry.auth
   }
-  delete reqOut.headers.host
-  delete reqOut.headers.authorization
+  var xForwardedServer = reqOut.headers['x-forwarded-server'];
+  var xForwardedFor = reqOut.headers['x-forwarded-for'];
+  var xForwardedHost = reqOut.headers['x-forwarded-host'];
 
+  delete reqOut.headers.host;
+  delete reqOut.headers.authorization;
+  delete reqOut.headers['x-forwarded-host'];
+  delete reqOut.headers['x-forwarded-for'];
+  delete reqOut.headers['x-forwarded-server'];
 
-  console.log('fwd req', reqOut)
+  console.log('Forward Request:\n', reqOut)
   reqOut = (/https/.test(reqOut.protocol) ? https : http).request(reqOut, function (res) {
-    console.log('res received')
+    console.log('Response received for ' + reqIn.url + ' from ' + registry.hostname);
     if (res.statusCode >= 400) {
-      console.log('bad response from ' + registry.hostname + ' ' + res.statusCode)
-      res.pipe(process.stdout)
-      return cb(new Error('Response from ' + registry.hostname + ': ' + res.statusCode))
+      console.log('Bad response from ' + registry.hostname + '. Status Code: ' + res.statusCode);
+      res.pipe(process.stdout);
+      return cb(new Error('Response from ' + registry.hostname + ': ' + res.statusCode));
     }
+
+    if (xForwardedServer) {
+      res.headers['x-forwarded-server'] = xForwardedServer;
+    }
+
+    if (xForwardedFor) {
+      res.headers['x-forwarded-for'] = xForwardedFor;
+    }
+
+    if (xForwardedHost) {
+      res.headers['x-forwarded-host'] = xForwardedHost;
+    }
+
     return cb(null, res);
   }).on('error', cb);
   reqOut.end();
 }
 
 function pipeRes(resFrom, resTo) {
-  copyHeaders(resFrom, resTo)
-  resFrom.pipe(resTo)
+  copyHeaders(resFrom, resTo);
+  resFrom.pipe(resTo);
 }
 
 function copyHeaders(resFrom, resTo) {
   resTo.statusCode = resFrom.statusCode;
   for (var header in resFrom.headers) {
-    resTo.setHeader(header, resFrom.headers[header])
+    resTo.setHeader(header, resFrom.headers[header]);
   }
 }
 
 
 function rebase(pathBase, path) {
-    console.log(pathBase, path)
+    console.log('pathBase: ' + pathBase + ' path: ' + path);
 
-    if (pathBase != '/registry') {
-      return path.replace('/registry','')
+    if ( path.indexOf ( '/registry/_design/app/_rewrite/' ) != 0 ) {
+        return pathBase + path;
+    }
+
+    if (pathBase === '/') {
+        return path;
+    }
+
+    if (pathBase !== '/registry') {
+      return path.replace('/registry','');
     }
 
     if (path.indexOf('/registry') != 0) {
@@ -130,6 +157,6 @@ function rebase(pathBase, path) {
 
 
 function die(msg) {
-  console.error(msg)
-  process.exit(1)
+  console.error(msg);
+  process.exit(1);
 }
